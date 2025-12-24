@@ -21,30 +21,38 @@ export default function Auth({ onAuthed }) {
 
   const canSubmit = emailOk && passwordOk && confirmOk && !busy;
 
-  async function submit(e) {
-    e.preventDefault();
-    if (!canSubmit) return;
+async function submit(e) {
+  e.preventDefault();
+  if (!canSubmit) return;
 
-    setServerError("");
-    setBusy(true);
+  setServerError("");
+  setBusy(true);
 
-    try {
-      if (mode === "signup") {
-        await signup(form.email.trim(), form.password);
-      }
+  try {
+    const email = form.email.trim();
 
-      const token = await login(form.email.trim(), form.password);
+    if (mode === "signup") {
+      await signup(email, form.password);
 
-      localStorage.setItem("access_token", token.access_token);
-      localStorage.setItem("token_type", token.token_type || "bearer");
+      setMode("login");
+      setForm((prev) => ({ ...prev, confirmPassword: "" }));
 
-      onAuthed({ email: form.email.trim() });
-    } catch (err) {
-      setServerError(err?.message || "Something went wrong");
-    } finally {
-      setBusy(false);
+      setServerError("Account created — please log in.");
+      return;
     }
+
+    const token = await login(email, form.password);
+    localStorage.setItem("access_token", token.access_token);
+    localStorage.setItem("token_type", token.token_type || "bearer");
+
+    onAuthed({ email });
+  } catch (err) {
+    setServerError(err?.message || "Something went wrong");
+  } finally {
+    setBusy(false);
   }
+}
+
 
   return (
     <div className="authWrap">
