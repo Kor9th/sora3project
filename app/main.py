@@ -3,7 +3,6 @@ from sqlalchemy.orm import Session
 from datetime import timedelta
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
-
 from . import models, crud, schemas, auth
 from .database import engine, get_database
 
