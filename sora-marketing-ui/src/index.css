@@ -337,23 +337,3 @@ body{
   margin-top: 6px;
   text-align:center;
 }
-
-.notice{
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 10px 12px;
-  font-size: 13px;
-  line-height: 1.3;
-}
-
-.notice.success{
-  border-color: rgba(16,185,129,.35);
-  background: rgba(16,185,129,.10);
-  color: #065f46;
-}
-
-.notice.error{
-  border-color: rgba(239,68,68,.30);
-  background: rgba(239,68,68,.08);
-  color: #7f1d1d;
-}

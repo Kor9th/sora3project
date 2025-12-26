@@ -28,3 +28,11 @@ venv/
 *.sqlite
 *.sqlite3
 sql_app.db
+__pycache__/
+*.pyc
+.env
+backend/.env
+node_modules/
+venv/
+.venv/
+

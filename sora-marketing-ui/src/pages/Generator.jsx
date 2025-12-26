@@ -10,7 +10,7 @@ function nowLabel() {
   });
 }
 
-export default function Generator() {
+export default function Generator({ userEmail = "" }) {
   const MAX_CHARS = 1000;
 
   const [prompt, setPrompt] = useState("");
@@ -29,25 +29,32 @@ export default function Generator() {
     [prompt, loading]
   );
 
+  const email =
+    userEmail || localStorage.getItem("user_email") || "";
+
+  function logout() {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("user_email");
+    window.location.reload();
+  }
+
   function reset() {
     setPrompt("");
     setDuration(5);
     setAspectRatio("16:9");
-    setLoading(false);
     setVideoUrl(null);
+    setLoading(false);
   }
 
   function generateFake() {
     setLoading(true);
-    setVideoUrl(null);
-
     setTimeout(() => {
-      const url = "https://www.w3schools.com/html/mov_bbb.mp4"; // placeholder, replace this later
+      const url = "https://www.w3schools.com/html/mov_bbb.mp4";
       setVideoUrl(url);
       setLoading(false);
 
       setHistory((prev) => [
-        { id: crypto.randomUUID(), createdAt: nowLabel(), prompt: prompt.trim(), url },
+        { id: crypto.randomUUID(), createdAt: nowLabel(), prompt, url },
         ...prev,
       ]);
     }, 1800);
@@ -55,7 +62,6 @@ export default function Generator() {
 
   return (
     <div className="container">
-      {/* Top bar */}
       <div className="topbar">
         <div className="brand">
           <div>
@@ -64,13 +70,20 @@ export default function Generator() {
           </div>
         </div>
 
-        <a className="smallLink" href="#" onClick={(e) => e.preventDefault()}>
-          Settings
-        </a>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {email ? (
+            <span className="badge" title={email}>
+              {email}
+            </span>
+          ) : null}
+
+          <button className="btn btnSecondary" onClick={logout}>
+            Log out
+          </button>
+        </div>
       </div>
 
       <div className="shell">
-        {/* LEFT: Generator */}
         <div className="card">
           <div className="cardHeader">
             <div>
@@ -87,27 +100,23 @@ export default function Generator() {
           </div>
 
           <div className="cardBody">
-            {/* Prompt */}
-            <div>
-              <div className="label">Marketing prompt</div>
-              <textarea
-                className="textarea"
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value.slice(0, MAX_CHARS))}
-                placeholder="Ex: A bright, modern skincare ad with soft studio lighting, clean white background, close-up product shots, and an upbeat tone."
-              />
+            <div className="label">Marketing prompt</div>
+            <textarea
+              className="textarea"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value.slice(0, MAX_CHARS))}
+              placeholder="Ex: A bright, modern skincare ad with soft studio lighting, clean white background, close-up product shots, and an upbeat tone."
+            />
 
-              <div className="promptMeta">
-                <span className={warn ? "hint warn" : "hint"}>
-                  Tips: include product, audience, setting, mood, camera style.
-                </span>
-                <span className={warn ? "counter warn" : "counter"}>
-                  {charCount}/{MAX_CHARS}
-                </span>
-              </div>
+            <div className="promptMeta">
+              <span className={warn ? "hint warn" : "hint"}>
+                Include product, audience, mood, and setting
+              </span>
+              <span className={warn ? "counter warn" : "counter"}>
+                {charCount}/{MAX_CHARS}
+              </span>
             </div>
 
-            {/* Settings */}
             <div className="row">
               <div>
                 <div className="label">Aspect ratio</div>
@@ -136,99 +145,62 @@ export default function Generator() {
               </div>
             </div>
 
-            {/* Actions */}
             <div className="actions">
-              <button
-                className="btn btnPrimary"
-                disabled={!canGenerate}
-                onClick={generateFake}
-              >
+              <button className="btn btnPrimary" disabled={!canGenerate} onClick={generateFake}>
                 {loading ? "Generating..." : "Generate video"}
               </button>
+
               <button className="btn btnSecondary" onClick={reset}>
                 Reset
               </button>
             </div>
+
+            {videoUrl && (
+              <div style={{ marginTop: 16 }}>
+                <video className="video" controls src={videoUrl} />
+              </div>
+            )}
           </div>
         </div>
 
-        {/* RIGHT: Preview + History */}
-        <div style={{ display: "grid", gap: 16 }}>
-          {/* Preview */}
-          <div className="card">
-            <div className="cardHeader">
-              <h2>Preview</h2>
-            </div>
-
-            <div className="cardBody">
-              {!videoUrl && !loading && (
-                <p className="muted">No video yet. Generate to preview here.</p>
-              )}
-              {loading && <p className="muted">Working on it…</p>}
-
-              {videoUrl && (
-                <>
-                  <video className="video" controls src={videoUrl} />
-                  <div className="actions" style={{ marginTop: 12 }}>
-                    <a className="btn btnPrimary" href={videoUrl} download>
-                      Download
-                    </a>
-                    <button
-                      className="btn btnSecondary"
-                      onClick={() => navigator.clipboard.writeText(prompt.trim())}
-                    >
-                      Copy prompt
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+        <div className="card">
+          <div className="cardHeader">
+            <h2>History</h2>
+            <div className="sub">{history.length ? "Recent runs" : "No runs yet"}</div>
           </div>
 
-          {/* History */}
-          <div className="card">
-            <div className="cardHeader">
-              <h2>History</h2>
-              <div className="sub">{history.length ? "Recent runs" : "No runs yet"}</div>
-            </div>
-
-            <div className="cardBody">
-              {!history.length && (
-                <p className="muted">Your generated videos will appear here.</p>
-              )}
-
-              {!!history.length && (
-                <div className="list">
-                  {history.slice(0, 5).map((h) => (
-                    <div className="item" key={h.id}>
-                      <div className="itemTop">
-                        <p className="itemTitle">{h.createdAt}</p>
-                        <a className="smallLink" href={h.url} download>
-                          Download
-                        </a>
-                      </div>
-
-                      <p className="itemMeta">
-                        {h.prompt.length > 120
-                          ? h.prompt.slice(0, 120) + "…"
-                          : h.prompt}
-                      </p>
-
-                      <a
-                        className="smallLink"
-                        href="#"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          setPrompt(h.prompt.slice(0, MAX_CHARS));
-                        }}
-                      >
-                        Use this prompt
+          <div className="cardBody">
+            {!history.length ? (
+              <p className="muted">Your generated videos will appear here.</p>
+            ) : (
+              <div className="list">
+                {history.slice(0, 5).map((h) => (
+                  <div className="item" key={h.id}>
+                    <div className="itemTop">
+                      <p className="itemTitle">{h.createdAt}</p>
+                      <a className="smallLink" href={h.url} download>
+                        Download
                       </a>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
+
+                    <p className="itemMeta">
+                      {h.prompt.length > 120 ? h.prompt.slice(0, 120) + "…" : h.prompt}
+                    </p>
+
+                    <a
+                      className="smallLink"
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setPrompt(h.prompt.slice(0, MAX_CHARS));
+                      }}
+                    >
+                      Use this prompt
+                    </a>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
