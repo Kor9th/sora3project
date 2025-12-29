@@ -1,5 +1,6 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, computed_field
 from typing import Optional
+import datetime
 
 
 class UserBase(BaseModel):
@@ -25,3 +26,20 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     email: Optional[str] = None
+
+
+class VideoCreate(BaseModel):
+    prompt: str
+
+class VideoResponse(BaseModel):
+    id: int
+    prompt: str
+    status: str
+    created_at: datetime.datetime
+    @computed_field
+    @property
+    def stream_url(self)-> str:
+        return f"/videos/{self.id}/stream"
+
+    class Config:
+        from_attributes = True

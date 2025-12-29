@@ -1,11 +1,14 @@
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
+import requests
 from datetime import timedelta
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
-from . import models, crud, schemas, auth
+from . import models, crud, schemas, auth , videogen, database
 from .database import engine, get_database
-
+from fastapi import BackgroundTasks
+from fastapi.responses import StreamingResponse
+import time
 
 app = FastAPI()
 
@@ -71,3 +74,115 @@ def read_users_me(current_user: models.User = Depends(auth.get_current_user)):
 @app.get("/verify")
 def verify_user(token: str, db: Session = Depends(get_database)):
                 return {"message": "Email verified succesfully"}
+
+def get_generation_video_url(generation_id: str):
+    url = f"{videogen.SORA_ENDPOINT}/video/generations/{generation_id}/content/video?api-version=preview&api-key={videogen.SORA_KEY}"
+    return url
+
+
+def run_azure(video_id:int , prompt:str):
+    db = database.SessionLocal()
+    try:
+            initial_response = videogen.request_video(prompt)
+            job_id = initial_response.get("id")
+            
+
+            while True:
+                status_data = videogen.get_generation_status(job_id)
+                if not status_data:
+                    raise Exception("Failed to get status data")
+                status = status_data.get("status")
+
+                video_record = db.query(models.VideoGeneration).filter(models.VideoGeneration.id==video_id).first()
+
+                if status == "succeeded":
+                    generations = status_data.get("generations", [])
+                    if generations:
+                        generation_id = generations[0].get("id")
+                        video_url = get_generation_video_url(generation_id)
+                        clean_url = video_url.split('api-key=')[0].rstrip('&?')
+                        video_record.video_url = clean_url
+                        video_record.status = "Completed"
+                        db.commit()
+                        break
+
+                elif status == "failed":
+                   
+                    video_record.status = "Failed"
+                    db.commit()
+                    break
+                else:
+                    
+                    import time
+                    time.sleep(2)  
+                    
+                   
+    except Exception as e:
+            print(f"background task error: {e}")
+            video_record = db.query(models.VideoGeneration).filter(models.VideoGeneration.id==video_id).first()
+            if video_record:
+                video_record.status ="failed"
+                db.commit()
+    finally:
+          db.close()
+
+
+
+@app.post("/generate", response_model=schemas.VideoResponse)
+def generate_video(video_in:schemas.VideoCreate,
+                   background_tasks: BackgroundTasks,
+                   db: Session = Depends(get_database),
+                   current_user: models.User = Depends(auth.get_current_user)
+                   ):
+      db_video = models.VideoGeneration(
+            prompt=video_in.prompt,
+            status = "processing",
+            user_id=current_user.id
+      )
+      db.add(db_video)
+      db.commit()
+      db.refresh(db_video)
+
+      background_tasks.add_task(
+            run_azure,
+            db_video.id,
+            video_in.prompt
+      )
+      return db_video
+
+
+@app.get("/videos/{video_id}", response_model=schemas.VideoResponse)
+def get_video_status(
+    video_id: int, 
+    db: Session = Depends(get_database),
+    current_user: models.User = Depends(auth.get_current_user)
+):
+    video = db.query(models.VideoGeneration).filter(
+        models.VideoGeneration.id == video_id,
+        models.VideoGeneration.user_id == current_user.id
+    ).first()
+    
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+        
+    return video
+
+@app.get("videos/{video_id}/stream")
+async def secure_vidstream(video_id: int, db:Session = Depends(get_database),
+                           current_user: models.User = Depends(auth.get_current_user)
+                           ):
+    video = db.query(models.VideoGeneration).filter(
+        models.VideoGeneration.id == video_id).first()
+     
+    if not video or not video.video_url:
+        raise HTTPException(status_code=404, detail="Video not found or not ready")
+    
+    secure_url = f"{video.video_url}?api-version=preview&api-key={videogen.SORA_KEY}"
+
+    def generate_stream():
+        with requests.get(secure_url, stream=True) as r:
+            r.raise_for_status()
+            for chunk in r.iter_content(chunk_size=8192):
+                yield chunk
+
+    return StreamingResponse(generate_stream(), media_type="video/mp4")
