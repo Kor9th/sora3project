@@ -80,10 +80,10 @@ def get_generation_video_url(generation_id: str):
     return url
 
 
-def run_azure(video_id:int , prompt:str):
+def run_azure(video_id:int , prompt:str,size_str:str):
     db = database.SessionLocal()
     try:
-            initial_response = videogen.request_video(prompt)
+            initial_response = videogen.request_video(prompt,size_str)
             job_id = initial_response.get("id")
             
 

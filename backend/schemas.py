@@ -30,6 +30,7 @@ class TokenData(BaseModel):
 
 class VideoCreate(BaseModel):
     prompt: str
+    size_str: str
 
 class VideoResponse(BaseModel):
     id: int

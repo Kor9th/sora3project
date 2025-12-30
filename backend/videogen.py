@@ -1,6 +1,7 @@
 import os
 import requests
 from dotenv import load_dotenv
+import re
 
 load_dotenv(dotenv_path=r"backend\.env")
 
@@ -23,13 +24,20 @@ SORA_KEY= os.getenv("SORA_KEY")
 RAW_ENDPOINT = SORA_ENDPOINT.split('?')[0] 
 API_VERSION = "preview"
 
-def request_video(prompt:str):
+def request_video(prompt:str, size_str: str = "720x720"):
+
+    clean_size = re.sub(r"\s*\(.*?\)", "", size_str)
+    dimensions = list(map(int, clean_size.split('x')))
+
+    height = dimensions[0]
+    width = dimensions[1]
+
     headers ={"api-key":SORA_KEY, "Content-Type":"application/json"}
     payload = {
         "prompt":prompt,
         "model":'sora',
-        "height" : 720,
-        "width" : 720,
+        "height" : height,
+        "width" : width,
         "n_seconds" : 2,
         "n_variants" : 1
         }
