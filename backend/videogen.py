@@ -24,23 +24,30 @@ SORA_KEY= os.getenv("SORA_KEY")
 RAW_ENDPOINT = SORA_ENDPOINT.split('?')[0] 
 API_VERSION = "preview"
 
-def request_video(prompt:str, size_str: str = "720x720"):
+def request_video(prompt:str, sec: str, size_str: str = "720x720", image: str = None):
 
     clean_size = re.sub(r"\s*\(.*?\)", "", size_str)
     dimensions = list(map(int, clean_size.split('x')))
 
-    height = dimensions[0]
-    width = dimensions[1]
+    height,width = dimensions
+    sec = int(sec)
 
     headers ={"api-key":SORA_KEY, "Content-Type":"application/json"}
     payload = {
-        "prompt":prompt,
         "model":'sora',
         "height" : height,
         "width" : width,
-        "n_seconds" : 2,
+        "n_seconds" : sec,
         "n_variants" : 1
         }
+    if image:
+        payload["input"] =[
+            {"type": "input_image", "image": image},
+            {"type": "input_text", "text": prompt}
+        ]
+   
+    else:
+        payload["prompt"] = prompt
 
     response = requests.post(SORA_ENDPOINT,headers=headers,json=payload)
 

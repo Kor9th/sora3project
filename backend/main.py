@@ -1,5 +1,7 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException,File, UploadFile, Form
 from sqlalchemy.orm import Session
+from typing import Optional
+import base64
 import requests
 from datetime import timedelta
 from fastapi.security import OAuth2PasswordRequestForm
@@ -80,10 +82,10 @@ def get_generation_video_url(generation_id: str):
     return url
 
 
-def run_azure(video_id:int , prompt:str,size_str:str):
+def run_azure(video_id:int , prompt:str,size_str:str,sec:str,image:str = None):
     db = database.SessionLocal()
     try:
-            initial_response = videogen.request_video(prompt,size_str)
+            initial_response = videogen.request_video(prompt,size_str,sec,image)
             job_id = initial_response.get("id")
             
 
@@ -127,28 +129,45 @@ def run_azure(video_id:int , prompt:str,size_str:str):
           db.close()
 
 
+def video_create_as_form(
+    prompt: str = Form(...),
+    size_str: str = Form("1080x1080"),
+    sec: int = Form(2)
+) -> schemas.VideoCreate:
+    return schemas.VideoCreate(prompt=prompt, size_str=size_str, sec=sec)
+
+
 
 @app.post("/generate", response_model=schemas.VideoResponse)
-def generate_video(video_in:schemas.VideoCreate,
-                   background_tasks: BackgroundTasks,
+async def generate_video(background_tasks: BackgroundTasks,
+                   video_in:schemas.VideoCreate=Depends(video_create_as_form),
+                   image: Optional[UploadFile] = File(None),
                    db: Session = Depends(get_database),
                    current_user: models.User = Depends(auth.get_current_user)
                    ):
-      db_video = models.VideoGeneration(
-            prompt=video_in.prompt,
-            status = "processing",
-            user_id=current_user.id
-      )
-      db.add(db_video)
-      db.commit()
-      db.refresh(db_video)
+    image_str = None
+    if image:
+        image_data = await image.read()
+        image_str= base64.b64encode(image_data).decode('utf-8')
 
-      background_tasks.add_task(
-            run_azure,
-            db_video.id,
-            video_in.prompt
-      )
-      return db_video
+    db_video = models.VideoGeneration(
+        prompt=video_in.prompt,
+        status = "processing",
+        user_id=current_user.id
+    )
+    db.add(db_video)
+    db.commit()
+    db.refresh(db_video)
+
+    background_tasks.add_task(
+        run_azure,
+        db_video.id,
+        video_in.prompt,
+        video_in.size_str,
+        video_in.sec,
+        image_str
+    )
+    return db_video
 
 
 @app.get("/videos/{video_id}", response_model=schemas.VideoResponse)

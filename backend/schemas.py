@@ -1,3 +1,4 @@
+from fastapi import FastAPI, File, UploadFile, Form, Depends
 from pydantic import BaseModel, EmailStr, Field, computed_field
 from typing import Optional
 import datetime
@@ -31,6 +32,8 @@ class TokenData(BaseModel):
 class VideoCreate(BaseModel):
     prompt: str
     size_str: str
+    sec: str
+
 
 class VideoResponse(BaseModel):
     id: int
