@@ -1,5 +1,8 @@
 import { useMemo, useState } from "react";
 
+const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
+const FIXED_SIZE = "1024x1024";
+
 function nowLabel() {
   const d = new Date();
   return d.toLocaleString([], {
@@ -10,52 +13,57 @@ function nowLabel() {
   });
 }
 
+function authHeaders() {
+  const token = localStorage.getItem("access_token");
+  const type = localStorage.getItem("token_type") || "bearer";
+  return token ? { Authorization: `${type} ${token}` } : {};
+}
+
+function streamUrl(videoId) {
+  return `${API_BASE}/videos/${videoId}/stream`;
+}
+
+async function getImageDimensions(file) {
+  const blobUrl = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    const dims = await new Promise((resolve, reject) => {
+      img.onload = () => resolve({ width: img.width, height: img.height });
+      img.onerror = reject;
+      img.src = blobUrl;
+    });
+    return dims;
+  } finally {
+    URL.revokeObjectURL(blobUrl);
+  }
+}
+
 export default function Generator({ onLogout, user }) {
   const [prompt, setPrompt] = useState("");
-  const [resolution, setResolution] = useState("1920x1080");
   const [duration, setDuration] = useState(6);
+
+  // assets (optional image)
+  const [assetFile, setAssetFile] = useState(null);
+  const [assetError, setAssetError] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [videoUrl, setVideoUrl] = useState(null);
+
   const [history, setHistory] = useState([]);
 
   const charLimit = 1000;
 
-  const canGenerate = useMemo(
-    () => prompt.trim().length >= 10 && !loading,
-    [prompt, loading]
-  );
+  const canGenerate = useMemo(() => {
+    return prompt.trim().length >= 10 && !loading;
+  }, [prompt, loading]);
 
   function reset() {
     setPrompt("");
-    setResolution("1920x1080");
     setDuration(6);
+    setAssetFile(null);
+    setAssetError("");
     setLoading(false);
     setVideoUrl(null);
-  }
-
-  // TEMP: fake generator until backend is stable
-  function generateFake() {
-    setLoading(true);
-    setVideoUrl(null);
-
-    setTimeout(() => {
-      const url = "https://www.w3schools.com/html/mov_bbb.mp4";
-      setVideoUrl(url);
-      setLoading(false);
-
-      setHistory((prev) => [
-        {
-          id: crypto.randomUUID(),
-          createdAt: nowLabel(),
-          prompt: prompt.trim(),
-          resolution,
-          duration,
-          url,
-        },
-        ...prev,
-      ]);
-    }, 1500);
   }
 
   function logout() {
@@ -64,15 +72,100 @@ export default function Generator({ onLogout, user }) {
     onLogout();
   }
 
+  async function onPickAsset(e) {
+    const file = e.target.files?.[0] || null;
+    setAssetError("");
+    setAssetFile(null);
+
+    if (!file) return;
+
+    // basic type check
+    if (!file.type.startsWith("image/")) {
+      setAssetError("Please upload an image file (PNG/JPG/WebP).");
+      return;
+    }
+
+    // Enforce "only little images" (<= 1024x1024 and square)
+    try {
+      const { width, height } = await getImageDimensions(file);
+
+      if (width !== height) {
+        setAssetError(`Image must be square. Yours is ${width}×${height}.`);
+        return;
+      }
+      if (width > 1024 || height > 1024) {
+        setAssetError(`Image must be 1024×1024 or smaller. Yours is ${width}×${height}.`);
+        return;
+      }
+
+      setAssetFile(file);
+    } catch {
+      setAssetError("Couldn’t read that image. Try a different file.");
+    }
+  }
+
+  async function generateVideo() {
+    if (!canGenerate) return;
+
+    setLoading(true);
+    setVideoUrl(null);
+
+    try {
+      const fd = new FormData();
+      fd.append("prompt", prompt.trim());
+      fd.append("size", FIXED_SIZE); // force 1024x1024
+      fd.append("seconds", String(duration));
+      if (assetFile) fd.append("image", assetFile);
+
+      const res = await fetch(`${API_BASE}/generate`, {
+        method: "POST",
+        headers: {
+          ...authHeaders(),
+          // NOTE: do NOT set Content-Type for FormData; browser sets boundary
+        },
+        body: fd,
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `Generate failed (${res.status})`);
+      }
+
+      const data = await res.json().catch(() => ({}));
+      const id = data.id ?? data.video_id ?? data.videoId;
+
+      if (!id) {
+        throw new Error("Generate succeeded but no video id was returned.");
+      }
+
+      const url = streamUrl(id);
+      setVideoUrl(url);
+
+      setHistory((prev) => [
+        {
+          id,
+          createdAt: nowLabel(),
+          prompt: prompt.trim(),
+          size: FIXED_SIZE,
+          duration,
+          url,
+        },
+        ...prev,
+      ]);
+    } catch (err) {
+      alert(err?.message || "Something went wrong generating the video.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="container">
       {/* TOP BAR */}
       <div className="topbar">
         <div>
           <h1>Marketing Video Generator</h1>
-          <p className="muted">
-            Prompt → generate → preview → download
-          </p>
+          <p className="muted">Prompt → generate → preview → stream</p>
         </div>
 
         <div className="userBar">
@@ -89,9 +182,7 @@ export default function Generator({ onLogout, user }) {
           <div className="cardHeader">
             <div>
               <h2>Create video</h2>
-              <div className="sub">
-                Describe the marketing video you want to generate.
-              </div>
+              <div className="sub">Uses your backend /generate endpoint.</div>
             </div>
 
             {loading && (
@@ -111,7 +202,7 @@ export default function Generator({ onLogout, user }) {
                 value={prompt}
                 maxLength={charLimit}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Example: A modern skincare ad, clean white background, soft studio lighting, close-up product shots, minimal motion graphics, calm luxury vibe."
+                placeholder="Example: A modern skincare ad, clean white background, soft studio lighting, close-up product shots..."
               />
 
               <div className="promptMeta">
@@ -124,20 +215,41 @@ export default function Generator({ onLogout, user }) {
               </div>
             </div>
 
+            {/* ASSET IMAGE */}
+            <div style={{ marginBottom: 14 }}>
+              <div className="label">
+                Asset image (optional) <span className="muted">— max 1024×1024</span>
+              </div>
+
+              <input
+                className="input"
+                type="file"
+                accept="image/*"
+                onChange={onPickAsset}
+                disabled={loading}
+              />
+
+              {assetFile && (
+                <div className="fieldHint">
+                  Selected: <strong>{assetFile.name}</strong>
+                </div>
+              )}
+
+              {assetError && (
+                <div className="fieldHint warn">{assetError}</div>
+              )}
+            </div>
+
             {/* OPTIONS */}
             <div className="row">
               <div>
                 <div className="label">Resolution</div>
-                <select
-                  className="select"
-                  value={resolution}
-                  onChange={(e) => setResolution(e.target.value)}
-                >
-                  <option value="1920x1080">1920×1080 (Full HD)</option>
-                  <option value="1280x720">1280×720 (HD)</option>
-                  <option value="1080x1920">1080×1920 (Vertical / Shorts)</option>
-                  <option value="1024x1024">1024×1024 (Square)</option>
+                <select className="select" value={FIXED_SIZE} disabled>
+                  <option value={FIXED_SIZE}>1024×1024 (fixed)</option>
                 </select>
+                <div className="fieldHint">
+                  Forced to 1024×1024 so only small assets go through.
+                </div>
               </div>
 
               <div>
@@ -146,6 +258,7 @@ export default function Generator({ onLogout, user }) {
                   className="select"
                   value={duration}
                   onChange={(e) => setDuration(Number(e.target.value))}
+                  disabled={loading}
                 >
                   <option value={5}>5</option>
                   <option value={10}>10</option>
@@ -158,13 +271,13 @@ export default function Generator({ onLogout, user }) {
             <div className="actions">
               <button
                 className="btn btnPrimary"
-                disabled={!canGenerate}
-                onClick={generateFake}
+                disabled={!canGenerate || !!assetError}
+                onClick={generateVideo}
               >
                 {loading ? "Generating…" : "Generate video"}
               </button>
 
-              <button className="btn btnSecondary" onClick={reset}>
+              <button className="btn btnSecondary" onClick={reset} disabled={loading}>
                 Reset
               </button>
             </div>
@@ -180,24 +293,20 @@ export default function Generator({ onLogout, user }) {
             </div>
 
             <div className="cardBody">
-              {!videoUrl && !loading && (
-                <p className="muted">No video yet.</p>
-              )}
-
+              {!videoUrl && !loading && <p className="muted">No video yet.</p>}
               {loading && <p className="muted">Working on it…</p>}
 
               {videoUrl && (
                 <>
                   <video className="video" controls src={videoUrl} />
                   <div className="actions" style={{ marginTop: 12 }}>
-                    <a className="btn btnPrimary" href={videoUrl} download>
-                      Download
+                    {/* Streaming URL;*/}
+                    <a className="btn btnPrimary" href={videoUrl} target="_blank" rel="noreferrer">
+                      Open stream
                     </a>
                     <button
                       className="btn btnSecondary"
-                      onClick={() =>
-                        navigator.clipboard.writeText(prompt.trim())
-                      }
+                      onClick={() => navigator.clipboard.writeText(prompt.trim())}
                     >
                       Copy prompt
                     </button>
@@ -211,16 +320,12 @@ export default function Generator({ onLogout, user }) {
           <div className="card">
             <div className="cardHeader">
               <h2>History</h2>
-              <div className="sub">
-                {history.length ? "Recent videos" : "No videos yet"}
-              </div>
+              <div className="sub">{history.length ? "Recent videos" : "No videos yet"}</div>
             </div>
 
             <div className="cardBody">
               {!history.length && (
-                <p className="muted">
-                  Generated videos will appear here.
-                </p>
+                <p className="muted">Generated videos will appear here.</p>
               )}
 
               {!!history.length && (
@@ -229,19 +334,22 @@ export default function Generator({ onLogout, user }) {
                     <div className="item" key={h.id}>
                       <div className="itemTop">
                         <p className="itemTitle">{h.createdAt}</p>
-                        <a className="smallLink" href={h.url} download>
-                          Download
+                        <a
+                          className="smallLink"
+                          href={h.url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Stream
                         </a>
                       </div>
 
                       <p className="itemMeta">
-                        {h.prompt.length > 120
-                          ? h.prompt.slice(0, 120) + "…"
-                          : h.prompt}
+                        {h.prompt.length > 120 ? h.prompt.slice(0, 120) + "…" : h.prompt}
                       </p>
 
                       <div className="itemMeta">
-                        {h.resolution} · {h.duration}s
+                        {h.size} · {h.duration}s
                       </div>
 
                       <a
@@ -250,11 +358,11 @@ export default function Generator({ onLogout, user }) {
                         onClick={(e) => {
                           e.preventDefault();
                           setPrompt(h.prompt);
-                          setResolution(h.resolution);
                           setDuration(h.duration);
+                          setVideoUrl(h.url);
                         }}
                       >
-                        Reuse prompt
+                        Preview this
                       </a>
                     </div>
                   ))}
