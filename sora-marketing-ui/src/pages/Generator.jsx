@@ -18,6 +18,7 @@ export default function Generator({ onLogout, user }) {
   const [loading, setLoading] = useState(false);
   const [videoUrl, setVideoUrl] = useState(null);
   const [history, setHistory] = useState([]);
+  const [statusMessage, setStatusMessage] = useState("");
 
   const charLimit = 1000;
 
@@ -32,11 +33,59 @@ export default function Generator({ onLogout, user }) {
     setDuration(6);
     setLoading(false);
     setVideoUrl(null);
+    setStatusMessage("");
+  }
+
+  async function pollVideoStatus(videoId, token) {
+    const maxAttempts = 180; // 180 * 2 seconds = 6 minutes max
+    let attempts = 0;
+
+    while (attempts < maxAttempts) {
+      try {
+        const statusRes = await fetch(`http://127.0.0.1:8000/videos/${videoId}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (statusRes.status === 401) {
+          throw new Error("Unauthorized: Please log in again.");
+        }
+
+        if (!statusRes.ok) {
+          throw new Error(`Status check failed (${statusRes.status})`);
+        }
+
+        const statusData = await statusRes.json();
+        const status = statusData.status?.toLowerCase();
+
+        if (status === "completed") {
+          return { success: true, data: statusData };
+        } else if (status === "failed") {
+          return { success: false, error: "Video generation failed" };
+        } else {
+          // Still processing - update status message
+          setStatusMessage(`Status: ${status}...`);
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+          attempts++;
+        }
+      } catch (err) {
+        console.error("Error polling status:", err);
+        if (err.message.includes("Unauthorized")) {
+          return { success: false, error: "Unauthorized" };
+        }
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        attempts++;
+      }
+    }
+
+    return { success: false, error: "Video generation timed out" };
   }
 
   async function generateVideo() {
     setLoading(true);
     setVideoUrl(null);
+    setStatusMessage("Submitting request...");
 
     try {
       const token = localStorage.getItem("access_token");
@@ -68,8 +117,45 @@ export default function Generator({ onLogout, user }) {
         throw new Error("Generate succeeded but backend did not return a video id.");
       }
 
-      const stream = `http://127.0.0.1:8000/videos/${id}/stream`;
-      setVideoUrl(stream);
+      setStatusMessage("Video generation started. Waiting for completion...");
+
+      // Poll for video completion
+      const pollResult = await pollVideoStatus(id, token);
+
+      if (!pollResult.success) {
+        if (pollResult.error === "Unauthorized") {
+          logout();
+          throw new Error("Session expired. Please log in again.");
+        }
+        throw new Error(pollResult.error || "Video generation failed");
+      }
+
+      setStatusMessage("Video ready! Downloading...");
+
+      // Fetch video with authentication and create blob URL
+      const streamEndpoint = `http://127.0.0.1:8000/videos/${id}/stream`;
+      const videoRes = await fetch(streamEndpoint, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!videoRes.ok) {
+        throw new Error(`Failed to fetch video stream (${videoRes.status})`);
+      }
+
+      console.log('Video response headers:', videoRes.headers.get('content-type'));
+      const videoBlob = await videoRes.blob();
+      console.log('Video blob size:', videoBlob.size, 'type:', videoBlob.type);
+      
+      if (videoBlob.size === 0) {
+        throw new Error("Received empty video file");
+      }
+
+      const blobUrl = URL.createObjectURL(videoBlob);
+      console.log('Created blob URL:', blobUrl);
+      setVideoUrl(blobUrl);
+      setStatusMessage("");
 
       setHistory((prev) => [
         {
@@ -78,11 +164,13 @@ export default function Generator({ onLogout, user }) {
           prompt: prompt.trim(),
           resolution,
           duration,
-          url: stream,
+          url: blobUrl,
+          streamEndpoint, // Keep endpoint for re-fetching if needed
         },
         ...prev,
       ]);
     } catch (err) {
+      setStatusMessage("");
       alert(err?.message || "Something went wrong generating the video.");
     } finally {
       setLoading(false);
@@ -212,20 +300,42 @@ export default function Generator({ onLogout, user }) {
 
             <div className="cardBody">
               {!videoUrl && !loading && <p className="muted">No video yet.</p>}
-              {loading && <p className="muted">Working on it…</p>}
+              {loading && (
+                <div>
+                  <p className="muted">Working on it…</p>
+                  {statusMessage && <p className="muted" style={{ marginTop: 8, fontSize: 14 }}>{statusMessage}</p>}
+                </div>
+              )}
 
               {videoUrl && (
                 <>
-                  <video className="video" controls src={videoUrl} />
+                  <video 
+                    className="video" 
+                    controls 
+                    src={videoUrl}
+                    onError={(e) => {
+                      console.error('Video error:', e);
+                      console.error('Video error code:', e.target.error?.code);
+                      console.error('Video error message:', e.target.error?.message);
+                      alert('Failed to load video. Error code: ' + (e.target.error?.code || 'unknown'));
+                    }}
+                    onLoadedData={() => {
+                      console.log('Video loaded successfully');
+                    }}
+                  />
                   <div className="actions" style={{ marginTop: 12 }}>
-                    <a
+                    <button
                       className="btn btnPrimary"
-                      href={videoUrl}
-                      target="_blank"
-                      rel="noreferrer"
+                      onClick={() => {
+                        // Download video with proper filename
+                        const a = document.createElement('a');
+                        a.href = videoUrl;
+                        a.download = `video-${Date.now()}.mp4`;
+                        a.click();
+                      }}
                     >
-                      Open stream
-                    </a>
+                      Download video
+                    </button>
                     <button
                       className="btn btnSecondary"
                       onClick={() => navigator.clipboard.writeText(prompt.trim())}
@@ -258,14 +368,18 @@ export default function Generator({ onLogout, user }) {
                     <div className="item" key={h.id}>
                       <div className="itemTop">
                         <p className="itemTitle">{h.createdAt}</p>
-                        <a
+                        <button
                           className="smallLink"
-                          href={h.url}
-                          target="_blank"
-                          rel="noreferrer"
+                          onClick={async () => {
+                            // Download this video
+                            const a = document.createElement('a');
+                            a.href = h.url;
+                            a.download = `video-${h.id}.mp4`;
+                            a.click();
+                          }}
                         >
-                          Stream
-                        </a>
+                          Download
+                        </button>
                       </div>
 
                       <p className="itemMeta">
@@ -279,11 +393,33 @@ export default function Generator({ onLogout, user }) {
                       <a
                         className="smallLink"
                         href="#"
-                        onClick={(e) => {
+                        onClick={async (e) => {
                           e.preventDefault();
                           setPrompt(h.prompt);
                           setResolution(h.resolution);
                           setDuration(h.duration);
+                          
+                          // Re-fetch video with auth if streamEndpoint is available
+                          if (h.streamEndpoint) {
+                            try {
+                              const token = localStorage.getItem("access_token");
+                              const videoRes = await fetch(h.streamEndpoint, {
+                                headers: {
+                                  Authorization: `Bearer ${token}`,
+                                },
+                              });
+                              if (videoRes.ok) {
+                                const videoBlob = await videoRes.blob();
+                                const blobUrl = URL.createObjectURL(videoBlob);
+                                setVideoUrl(blobUrl);
+                                return;
+                              }
+                            } catch (err) {
+                              console.error("Failed to re-fetch video:", err);
+                            }
+                          }
+                          
+                          // Fallback to existing URL
                           setVideoUrl(h.url);
                         }}
                       >

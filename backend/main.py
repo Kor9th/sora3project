@@ -78,7 +78,9 @@ def verify_user(token: str, db: Session = Depends(get_database)):
                 return {"message": "Email verified succesfully"}
 
 def get_generation_video_url(generation_id: str):
-    url = f"{videogen.SORA_ENDPOINT}/video/generations/{generation_id}/content/video?api-version=preview&api-key={videogen.SORA_KEY}"
+    # Remove /jobs and query params from the endpoint to get the base URL
+    base_url = videogen.SORA_ENDPOINT.split('/jobs')[0]
+    url = f"{base_url}/{generation_id}/content/video?api-version=preview&api-key={videogen.SORA_KEY}"
     return url
 
 
@@ -88,35 +90,47 @@ def run_azure(video_id:int , prompt:str,size_str:str,sec:str,image:str = None):
             initial_response = videogen.request_video(prompt,size_str,sec,image)
             job_id = initial_response.get("id")
             
+            consecutive_errors = 0
+            max_consecutive_errors = 10
 
             while True:
-                status_data = videogen.get_generation_status(job_id)
-                if not status_data:
-                    raise Exception("Failed to get status data")
-                status = status_data.get("status")
+                try:
+                    status_data = videogen.get_generation_status(job_id)
+                    consecutive_errors = 0 # Reset on success
 
-                video_record = db.query(models.VideoGeneration).filter(models.VideoGeneration.id==video_id).first()
+                    if not status_data:
+                        raise Exception("Failed to get status data")
+                    status = status_data.get("status")
 
-                if status == "succeeded":
-                    generations = status_data.get("generations", [])
-                    if generations:
-                        generation_id = generations[0].get("id")
-                        video_url = get_generation_video_url(generation_id)
-                        clean_url = video_url.split('?')[0]
-                        video_record.video_url = clean_url
-                        video_record.status = "Completed"
+                    video_record = db.query(models.VideoGeneration).filter(models.VideoGeneration.id==video_id).first()
+
+                    if status == "succeeded":
+                        generations = status_data.get("generations", [])
+                        if generations:
+                            generation_id = generations[0].get("id")
+                            video_url = get_generation_video_url(generation_id)
+                            clean_url = video_url.split('?')[0]
+                            video_record.video_url = clean_url
+                            video_record.status = "Completed"
+                            db.commit()
+                            break
+
+                    elif status == "failed":
+                    
+                        video_record.status = "Failed"
                         db.commit()
                         break
-
-                elif status == "failed":
-                   
-                    video_record.status = "Failed"
-                    db.commit()
-                    break
-                else:
-                    
+                    else:
+                        
+                        import time
+                        time.sleep(5)  
+                except Exception as poll_error:
+                    print(f"Polling error: {poll_error}")
+                    consecutive_errors += 1
+                    if consecutive_errors >= max_consecutive_errors:
+                        raise poll_error
                     import time
-                    time.sleep(2)  
+                    time.sleep(5)
                     
                    
     except Exception as e:
@@ -204,9 +218,17 @@ async def secure_vidstream(video_id: int, db:Session = Depends(get_database),
         with requests.get(secure_url, stream=True) as r:
             r.raise_for_status()
             for chunk in r.iter_content(chunk_size=8192):
-                yield chunk
+                if chunk:
+                    yield chunk
 
-    return StreamingResponse(generate_stream(), media_type="video/mp4")
+    return StreamingResponse(
+        generate_stream(), 
+        media_type="video/mp4",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Disposition": f"inline; filename=video_{video_id}.mp4"
+        }
+    )
 
 
 @app.get("/videos", response_model=list[schemas.VideoResponse])
