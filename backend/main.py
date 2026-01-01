@@ -132,7 +132,7 @@ def run_azure(video_id:int , prompt:str,size_str:str,sec:str,image:str = None):
 def video_create_as_form(
     prompt: str = Form(...),
     size_str: str = Form("1080x1080"),
-    sec: int = Form(2)
+    sec: str = Form(2)
 ) -> schemas.VideoCreate:
     return schemas.VideoCreate(prompt=prompt, size_str=size_str, sec=sec)
 
@@ -158,6 +158,7 @@ async def generate_video(background_tasks: BackgroundTasks,
     db.add(db_video)
     db.commit()
     db.refresh(db_video)
+    print(video_in.size_str)
 
     background_tasks.add_task(
         run_azure,

@@ -24,13 +24,22 @@ SORA_KEY= os.getenv("SORA_KEY")
 RAW_ENDPOINT = SORA_ENDPOINT.split('?')[0] 
 API_VERSION = "preview"
 
-def request_video(prompt:str, sec: str, size_str: str = "720x720", image: str = None):
+def request_video(prompt:str, size_str: str ,sec: str, image: str = None):
 
     clean_size = re.sub(r"\s*\(.*?\)", "", size_str)
     dimensions = list(map(int, clean_size.split('x')))
 
-    height,width = dimensions
-    sec = int(sec)
+    
+    
+    if len(dimensions) == 2:
+        width, height = dimensions
+    else:
+        # Default fallback if the string is malformed (e.g., "1080")
+        width, height = 1024, 1024 
+        print(f"WARNING: Invalid size_str '{size_str}'. Defaulting to 1024x1024.")
+    
+
+   
 
     headers ={"api-key":SORA_KEY, "Content-Type":"application/json"}
     payload = {
