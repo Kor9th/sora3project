@@ -78,7 +78,11 @@ def verify_user(token: str, db: Session = Depends(get_database)):
                 return {"message": "Email verified succesfully"}
 
 def get_generation_video_url(generation_id: str):
-    # Remove /jobs and query params from the endpoint to get the base URL
+
+    # FIX: Corrected video URL construction by removing '/jobs' from the endpoint
+    # Previously was creating invalid URLs like .../jobs/video/generations/...
+    # Now creates proper URLs: .../openai/v1/video/generations/{id}/content/video
+
     base_url = videogen.SORA_ENDPOINT.split('/jobs')[0]
     url = f"{base_url}/{generation_id}/content/video?api-version=preview&api-key={videogen.SORA_KEY}"
     return url
@@ -90,6 +94,11 @@ def run_azure(video_id:int , prompt:str,size_str:str,sec:str,image:str = None):
             initial_response = videogen.request_video(prompt,size_str,sec,image)
             job_id = initial_response.get("id")
             
+
+            # FIX: Added retry logic to handle temporary network connection issues
+            # Tracks consecutive errors and allows up to 10 retries before giving up
+            # This prevents the entire video generation from failing due to brief network hiccups
+
             consecutive_errors = 0
             max_consecutive_errors = 10
 
@@ -124,6 +133,11 @@ def run_azure(video_id:int , prompt:str,size_str:str,sec:str,image:str = None):
                         
                         import time
                         time.sleep(5)  
+
+                # FIX: Catch network errors during polling and retry instead of crashing
+                # Waits 5 seconds between retries to avoid overwhelming the server
+                # Only gives up after 10 consecutive failures (about 50 seconds of downtime)
+
                 except Exception as poll_error:
                     print(f"Polling error: {poll_error}")
                     consecutive_errors += 1
@@ -220,6 +234,10 @@ async def secure_vidstream(video_id: int, db:Session = Depends(get_database),
             for chunk in r.iter_content(chunk_size=8192):
                 if chunk:
                     yield chunk
+
+    # FIX: Added proper HTTP headers for video streaming
+    # "Accept-Ranges: bytes" allows browser to seek/scrub through video
+    # "Content-Disposition: inline" tells browser to play video instead of downloading
 
     return StreamingResponse(
         generate_stream(), 

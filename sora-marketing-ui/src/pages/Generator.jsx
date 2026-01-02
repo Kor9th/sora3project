@@ -18,7 +18,11 @@ export default function Generator({ onLogout, user }) {
   const [loading, setLoading] = useState(false);
   const [videoUrl, setVideoUrl] = useState(null);
   const [history, setHistory] = useState([]);
+
+  // FIX: Added status message to show real-time updates during video generation
+  // This displays current status like "queued", "running", or "processing" to the user
   const [statusMessage, setStatusMessage] = useState("");
+
 
   const charLimit = 1000;
 
@@ -36,6 +40,11 @@ export default function Generator({ onLogout, user }) {
     setStatusMessage("");
   }
 
+
+  // FIX: Added polling function to check video generation status every 2 seconds
+  // Prevents trying to download video before it's ready (which caused 404 errors)
+  // Will keep checking for up to 6 minutes before timing out
+
   async function pollVideoStatus(videoId, token) {
     const maxAttempts = 180; // 180 * 2 seconds = 6 minutes max
     let attempts = 0;
@@ -47,6 +56,10 @@ export default function Generator({ onLogout, user }) {
             Authorization: `Bearer ${token}`,
           },
         });
+
+
+        // FIX: Detect when user's login session has expired (401 error)
+        // Previously this would fail silently, now it tells the user to log in again
 
         if (statusRes.status === 401) {
           throw new Error("Unauthorized: Please log in again.");
@@ -119,8 +132,14 @@ export default function Generator({ onLogout, user }) {
 
       setStatusMessage("Video generation started. Waiting for completion...");
 
-      // Poll for video completion
+      // FIX: Wait for video generation to complete before trying to download
+      // Previously tried to fetch immediately which caused 404 errors
+
       const pollResult = await pollVideoStatus(id, token);
+
+
+      // FIX: Handle authentication errors during polling
+      // If session expired, automatically log out user and show clear error message
 
       if (!pollResult.success) {
         if (pollResult.error === "Unauthorized") {
@@ -132,7 +151,9 @@ export default function Generator({ onLogout, user }) {
 
       setStatusMessage("Video ready! Downloading...");
 
-      // Fetch video with authentication and create blob URL
+      // FIX: Fetch video using authentication token to access protected endpoint
+      // Without the token, the browser gets 401 Unauthorized error
+
       const streamEndpoint = `http://127.0.0.1:8000/videos/${id}/stream`;
       const videoRes = await fetch(streamEndpoint, {
         headers: {
@@ -151,6 +172,9 @@ export default function Generator({ onLogout, user }) {
       if (videoBlob.size === 0) {
         throw new Error("Received empty video file");
       }
+
+      // FIX: Convert downloaded video data into a blob URL that the browser can play
+      // This allows the video to work in the <video> tag without authentication issues
 
       const blobUrl = URL.createObjectURL(videoBlob);
       console.log('Created blob URL:', blobUrl);
@@ -327,7 +351,10 @@ export default function Generator({ onLogout, user }) {
                     <button
                       className="btn btnPrimary"
                       onClick={() => {
-                        // Download video with proper filename
+
+                        // FIX: Changed from "Open stream" to proper download functionality
+                        // Creates a download link and triggers it to save video to user's computer
+
                         const a = document.createElement('a');
                         a.href = videoUrl;
                         a.download = `video-${Date.now()}.mp4`;
@@ -399,7 +426,10 @@ export default function Generator({ onLogout, user }) {
                           setResolution(h.resolution);
                           setDuration(h.duration);
                           
-                          // Re-fetch video with auth if streamEndpoint is available
+
+                          // FIX: When previewing old videos, re-fetch them with authentication
+                          // This ensures videos from history can still be played even after browser refresh
+
                           if (h.streamEndpoint) {
                             try {
                               const token = localStorage.getItem("access_token");
