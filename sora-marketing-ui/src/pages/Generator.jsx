@@ -10,6 +10,8 @@ function nowLabel() {
   });
 }
 
+// 
+
 export default function Generator({ onLogout, user }) {
   const [prompt, setPrompt] = useState("");
   const [resolution, setResolution] = useState("1920x1080");
