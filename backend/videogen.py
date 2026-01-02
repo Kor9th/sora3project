@@ -75,6 +75,6 @@ def get_generation_status(id: str):
    
     data = response.json()
     
-    print(f"DEBUG Polling: Status Code {response.status_code} | Data: {data}")
+    
     
     return data
