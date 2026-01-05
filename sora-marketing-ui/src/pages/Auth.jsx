@@ -2,57 +2,49 @@ import { useEffect, useMemo, useState } from "react";
 import { login, signup } from "../api/authClient";
 
 export default function Auth({ onAuthed }) {
-  // SIGN UP FIRST
+  // FORCE signup on first load
   const [mode, setMode] = useState("signup");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
 
   useEffect(() => {
     setMode("signup");
   }, []);
 
-  const isSignup = mode === "signup";
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
 
-  const canSubmit = useMemo(() => {
-    if (!email.trim()) return false;
-    if (password.length < 8) return false;
-    if (isSignup && password !== confirm) return false;
-    return true;
-  }, [email, password, confirm, isSignup]);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  async function handleSubmit(e) {
+  const emailOk = useMemo(() => /\S+@\S+\.\S+/.test(email), [email]);
+  const passwordOk = useMemo(() => password.length >= 8, [password]);
+  const confirmOk = mode === "login" || password === confirm;
+
+  const canSubmit = emailOk && passwordOk && confirmOk && !busy;
+
+  async function submit(e) {
     e.preventDefault();
     if (!canSubmit) return;
 
-    setError("");
     setBusy(true);
+    setError("");
+    setMessage("");
 
     try {
-      const cleanEmail = email.trim();
-
-      if (isSignup) {
-        await signup(cleanEmail, password);
+      if (mode === "signup") {
+        await signup(email.trim(), password);
         setMode("login");
         setConfirm("");
+        setMessage("Account created — please log in.");
         return;
       }
 
-      const token = await login(cleanEmail, password);
-      const accessToken =
-        token?.access_token || token?.token || (typeof token === "string" ? token : "");
-
-      if (!accessToken) throw new Error("No access token returned");
-
-      localStorage.setItem("access_token", accessToken);
-      localStorage.setItem("user_email", cleanEmail);
-
-      onAuthed?.({ email: cleanEmail });
+      const token = await login(email.trim(), password);
+      localStorage.setItem("access_token", token.access_token);
+      onAuthed({ email });
     } catch (err) {
-      setError(err?.message || "Something went wrong");
+      setError(err?.message || "Auth failed");
     } finally {
       setBusy(false);
     }
@@ -61,34 +53,35 @@ export default function Auth({ onAuthed }) {
   return (
     <div className="authWrap">
       <div className="authCard">
+        {/* HEADER */}
         <div className="authHeader">
           <h1>Marketing Video Generator</h1>
-          <p className="sub">
-            {isSignup
-              ? "Create an account to get started."
-              : "Log in to generate videos."}
+
+          {/* ✅ ADDED CONTENT */}
+          <p className="muted">
+            Create AI-powered marketing videos with your own assets.
           </p>
+
+          <ul className="authBenefits">
+            {/* <li>Generate videos in seconds</li>
+            <li>Upload product images</li>
+            <li>Download instantly</li> */}
+          </ul>
         </div>
 
+        {/* TABS */}
         <div className="authTabs">
           <button
-            className={`tab ${isSignup ? "active" : ""}`}
-            onClick={() => {
-              setMode("signup");
-              setError("");
-            }}
+            className={mode === "signup" ? "tab active" : "tab"}
+            onClick={() => setMode("signup")}
             type="button"
             disabled={busy}
           >
             Sign up
           </button>
-
           <button
-            className={`tab ${!isSignup ? "active" : ""}`}
-            onClick={() => {
-              setMode("login");
-              setError("");
-            }}
+            className={mode === "login" ? "tab active" : "tab"}
+            onClick={() => setMode("login")}
             type="button"
             disabled={busy}
           >
@@ -96,35 +89,38 @@ export default function Auth({ onAuthed }) {
           </button>
         </div>
 
-        <form className="authForm" onSubmit={handleSubmit}>
+        {/* FORM */}
+        <form onSubmit={submit} className="authForm">
+          {message && <div className="notice success">{message}</div>}
+          {error && <div className="notice error">{error}</div>}
+
           <div>
-            <label className="label">Email</label>
+            <div className="label">Email</div>
             <input
               className="input"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="email"
-              placeholder="you@example.com"
               disabled={busy}
             />
           </div>
 
           <div>
-            <label className="label">Password</label>
+            <div className="label">Password</div>
             <input
               className="input"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="At least 8 characters"
-              autoComplete={isSignup ? "new-password" : "current-password"}
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
               disabled={busy}
             />
           </div>
 
-          {isSignup && (
+          {mode === "signup" && (
             <div>
-              <label className="label">Confirm password</label>
+              <div className="label">Confirm password</div>
               <input
                 className="input"
                 type="password"
@@ -137,10 +133,8 @@ export default function Auth({ onAuthed }) {
             </div>
           )}
 
-          {error && <div className="notice error">{error}</div>}
-
-          <button className="btn btnPrimary" disabled={!canSubmit || busy}>
-            {busy ? "Working…" : isSignup ? "Create account" : "Log in"}
+          <button className="btn btnPrimary" disabled={!canSubmit} type="submit">
+            {busy ? "Please wait…" : mode === "signup" ? "Create account" : "Log in"}
           </button>
         </form>
       </div>
